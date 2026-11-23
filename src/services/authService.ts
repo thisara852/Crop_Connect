@@ -28,6 +28,12 @@ export interface RegisterData {
   district: string;
   farmOrBusinessName?: string;
   acres?: number;
+  businessAddress?: string;
+  buyerBusinessType?: 'wholesaler' | 'supermarket' | 'restaurant' | 'retailer' | 'exporter' | 'processor';
+  preferredCrops?: string[];
+  minOrderKg?: number;
+  maxOrderKg?: number;
+  preferredDistricts?: string[];
 }
 
 export interface ValidationResult {
