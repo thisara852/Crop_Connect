@@ -14,22 +14,71 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useResponsive } from '../hooks/useResponsive';
 import { useAuth } from '../hooks/useAuth';
+import { saveBuyerProfile, updateUserDoc, saveFarmerProfile } from '../services/firestoreService';
 
 export const EditProfileScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
   const { user, role } = useAuth();
+  const [saving, setSaving] = useState(false);
 
-  const [fullName, setFullName] = useState(user?.fullName || 'Sunil Bandara');
-  const [phone, setPhone] = useState(user?.phone || '+94 77 123 4567');
-  const [email, setEmail] = useState(user?.email || 'sunil.bandara@cropconnect.lk');
-  const [farmName, setFarmName] = useState(user?.farmName || 'Green Mountain Hill Farm');
+  const [fullName, setFullName] = useState(user?.fullName || 'Dilan Perera');
+  const [phone, setPhone] = useState(user?.phone || '+94 71 987 6543');
+  const [email, setEmail] = useState(user?.email || 'dilan.freshmart@cropconnect.lk');
+  const [farmName, setFarmName] = useState(user?.farmName || (role === 'buyer' ? 'Pettah Fresh Wholesale Hub' : 'Green Mountain Hill Farm'));
   const [acres, setAcres] = useState('4.5');
-  const [selectedDistrict, setSelectedDistrict] = useState(user?.location.district || 'Nuwara Eliya');
-  const [address, setAddress] = useState(user?.location.address || 'Kandapola, Nuwara Eliya');
+  const [selectedDistrict, setSelectedDistrict] = useState(user?.location.district || (role === 'buyer' ? 'Colombo' : 'Nuwara Eliya'));
+  const [address, setAddress] = useState(user?.location.address || (role === 'buyer' ? 'Manning Wholesale Market, Pettah, Colombo 11' : 'Kandapola, Nuwara Eliya'));
 
-  const handleSave = () => {
-    alert('Profile information updated successfully! 🌾');
-    router.back();
+  const handleSave = async () => {
+    if (!fullName.trim()) {
+      alert('Please enter your full name.');
+      return;
+    }
+    if (!phone.trim()) {
+      alert('Please enter your contact phone number.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const userId = user?.id || (role === 'buyer' ? 'buyer_001' : 'farmer_001');
+
+      // Update user document
+      await updateUserDoc(userId, {
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        district: selectedDistrict,
+      }, userId);
+
+      if (role === 'buyer') {
+        await saveBuyerProfile(userId, {
+          businessName: farmName.trim(),
+          contactPerson: fullName.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          address: address.trim(),
+          district: selectedDistrict,
+        }, userId);
+        alert('Buyer business profile updated and synced with Cloud Firestore! ✅');
+      } else {
+        await saveFarmerProfile(userId, {
+          fullName: fullName.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          farmName: farmName.trim(),
+          landSizeAcres: parseFloat(acres) || 2.0,
+          district: selectedDistrict,
+          address: address.trim(),
+        }, userId);
+        alert('Farmer profile updated and synced with Cloud Firestore! 🌾');
+      }
+
+      router.back();
+    } catch (err: any) {
+      alert(`Update Failed: ${err?.message || 'Could not save profile to Cloud Firestore.'}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -182,11 +231,12 @@ export const EditProfileScreen: React.FC = () => {
         />
 
         <Button
-          title="Save Changes"
+          title={saving ? "Saving Changes..." : "Save Changes"}
           variant="primary"
           size="lg"
           icon="save-outline"
           fullWidth
+          loading={saving}
           onPress={handleSave}
           style={{ marginTop: scaleSize(Spacing.md) }}
         />

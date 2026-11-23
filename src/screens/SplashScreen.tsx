@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Animated,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,10 +14,11 @@ import { useResponsive } from '../hooks/useResponsive';
 
 export const SplashScreen: React.FC = () => {
   const { scaleSize, scaleFont } = useResponsive();
-  const [fadeAnim] = useState(() => new Animated.Value(0));
-  const [scaleAnim] = useState(() => new Animated.Value(0.85));
+  const [fadeAnim] = useState(() => new Animated.Value(Platform.OS === 'web' ? 1 : 0));
+  const [scaleAnim] = useState(() => new Animated.Value(Platform.OS === 'web' ? 1 : 0.85));
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,

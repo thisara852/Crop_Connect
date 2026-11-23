@@ -18,6 +18,7 @@ import { CropListingCard } from '../components/home/CropListingCard';
 import { useResponsive } from '../hooks/useResponsive';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../hooks/useTheme';
+import { useLocalization } from '../contexts/LocalizationContext';
 import { getMockMarketTickers } from '../services/aiService';
 import {
   getFarmerListings,
@@ -30,6 +31,7 @@ export const FarmerDashboardScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
   const { user } = useAuth();
   const { isDark } = useTheme();
+  const { t, language } = useLocalization();
 
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -40,7 +42,11 @@ export const FarmerDashboardScreen: React.FC = () => {
 
   const currentHour = new Date().getHours();
   const greeting =
-    currentHour < 12
+    language === 'si'
+      ? 'ආයුබෝවන්'
+      : language === 'ta'
+      ? 'வணக்கம்'
+      : currentHour < 12
       ? 'Good Morning'
       : currentHour < 17
       ? 'Good Afternoon'
@@ -143,7 +149,7 @@ export const FarmerDashboardScreen: React.FC = () => {
               <View style={{ flex: 1 }}>
                 <View style={styles.badgeRow}>
                   <Text style={[styles.greeting, { fontSize: scaleFont(12) }]}>
-                    {greeting.toUpperCase()} • ආයුබෝවන් 🌾
+                    {greeting.toUpperCase()} · {t.farmer} 🌾
                   </Text>
                 </View>
                 <Text style={[styles.farmerName, { fontSize: scaleFont(20) }]}>

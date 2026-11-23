@@ -11,12 +11,13 @@ import { Palette, Spacing, BorderRadius, Shadows } from '../constants/theme';
 import { Header } from '../components/common/Header';
 import { useResponsive } from '../hooks/useResponsive';
 import { useTheme } from '../hooks/useTheme';
+import { useLocalization } from '../contexts/LocalizationContext';
 
 export const SettingsScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
   const { isDark, setMode } = useTheme();
+  const { language, setLanguage } = useLocalization();
 
-  const [language, setLanguage] = useState<'en' | 'si' | 'ta'>('en');
   const [rescueAlerts, setRescueAlerts] = useState(true);
   const [priceAlerts, setPriceAlerts] = useState(true);
   const [offlineSync, setOfflineSync] = useState(true);

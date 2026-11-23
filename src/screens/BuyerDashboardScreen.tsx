@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Modal,
   Alert,
-  Linking,
   TextInput,
   Switch,
   Platform,
@@ -49,6 +48,12 @@ import {
   BuyerPaymentTerms,
 } from '../types/database';
 
+const getDefaultPickupDate = (): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + 2);
+  return d.toISOString().split('T')[0];
+};
+
 export const BuyerDashboardScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
   const { isDark } = useTheme();
@@ -75,6 +80,7 @@ export const BuyerDashboardScreen: React.FC = () => {
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [enquiryModalVisible, setEnquiryModalVisible] = useState(false);
   const [threadModalVisible, setThreadModalVisible] = useState(false);
+  const [allEnquiriesModalVisible, setAllEnquiriesModalVisible] = useState(false);
 
   // Selected entities for modals
   const [selectedListingForOffer, setSelectedListingForOffer] = useState<FirestoreCropListing | null>(null);
@@ -97,9 +103,7 @@ export const BuyerDashboardScreen: React.FC = () => {
   // Form states - Offer Modal
   const [offerPriceInput, setOfferPriceInput] = useState('');
   const [offerQuantityInput, setOfferQuantityInput] = useState('');
-  const [offerPickupDateInput, setOfferPickupDateInput] = useState(
-    new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]
-  );
+  const [offerPickupDateInput, setOfferPickupDateInput] = useState(() => getDefaultPickupDate());
   const [offerTransportBuyerInput, setOfferTransportBuyerInput] = useState(true);
   const [offerNotesInput, setOfferNotesInput] = useState('');
   const [submittingOffer, setSubmittingOffer] = useState(false);
@@ -274,7 +278,7 @@ export const BuyerDashboardScreen: React.FC = () => {
     setSelectedOfferToEdit(null);
     setOfferPriceInput(listing.askingPricePerKg.toString());
     setOfferQuantityInput((listing.minOrderKg || 100).toString());
-    setOfferPickupDateInput(new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0]);
+    setOfferPickupDateInput(getDefaultPickupDate());
     setOfferTransportBuyerInput(true);
     setOfferNotesInput('');
     setOfferModalVisible(true);
@@ -563,6 +567,58 @@ export const BuyerDashboardScreen: React.FC = () => {
           </View>
           <Ionicons name="chevron-forward" size={scaleSize(18)} color={Palette.primary} />
         </TouchableOpacity>
+
+        {/* Quick Market Intelligence Row */}
+        <View
+          style={{
+            flexDirection: 'row',
+            marginHorizontal: scaleSize(contentPadding),
+            marginTop: scaleSize(8),
+            gap: scaleSize(8),
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => router.push('/price-comparison')}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: Palette.surface,
+              padding: scaleSize(10),
+              borderRadius: BorderRadius.md,
+              borderWidth: 1,
+              borderColor: Palette.warmBorder,
+              gap: scaleSize(6),
+            }}
+          >
+            <Ionicons name="stats-chart" size={scaleSize(16)} color={Palette.primary} />
+            <Text style={{ fontSize: scaleFont(11), fontWeight: '700', color: Palette.charcoal }}>
+              Compare Rates
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => router.push('/price-history')}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: Palette.surface,
+              padding: scaleSize(10),
+              borderRadius: BorderRadius.md,
+              borderWidth: 1,
+              borderColor: Palette.warmBorder,
+              gap: scaleSize(6),
+            }}
+          >
+            <Ionicons name="time" size={scaleSize(16)} color={Palette.secondary} />
+            <Text style={{ fontSize: scaleFont(11), fontWeight: '700', color: Palette.charcoal }}>
+              Price History
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Urgent Crop Rescue Clearance Banner */}
         <CropRescueBanner
@@ -927,6 +983,10 @@ export const BuyerDashboardScreen: React.FC = () => {
                 Direct communications with local farm producers
               </Text>
             </View>
+
+            <TouchableOpacity onPress={() => setAllEnquiriesModalVisible(true)}>
+              <Text style={[styles.viewAllText, { fontSize: scaleFont(12) }]}>View All History ➔</Text>
+            </TouchableOpacity>
           </View>
 
           {enquiries.length === 0 ? (
@@ -1695,6 +1755,102 @@ export const BuyerDashboardScreen: React.FC = () => {
                 <Ionicons name="send" size={16} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ======================================================== */}
+      {/* MODAL 5: ALL ENQUIRY HISTORY VIEW                        */}
+      {/* ======================================================== */}
+      <Modal
+        visible={allEnquiriesModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setAllEnquiriesModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={[styles.modalTitle, { fontSize: scaleFont(17) }]}>
+                  All Enquiry History ({enquiries.length})
+                </Text>
+                <Text style={[styles.modalSub, { fontSize: scaleFont(12) }]}>
+                  Direct communication log with farm producers
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setAllEnquiriesModalVisible(false)}>
+                <Ionicons name="close-circle" size={scaleSize(24)} color={Palette.slateMedium} />
+              </TouchableOpacity>
+            </View>
+
+            {enquiries.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center' }}>
+                <Ionicons name="mail-outline" size={36} color={Palette.slateMedium} />
+                <Text style={{ marginTop: 8, fontWeight: '700', color: Palette.charcoal }}>
+                  No Enquiry Messages
+                </Text>
+                <Text style={{ color: Palette.slateMedium, textAlign: 'center', marginTop: 4 }}>
+                  Browse crop listings above to send direct inquiries to farmers.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {enquiries.map((enq) => {
+                  const isIncoming = enq.recipientId === buyerId;
+                  const otherPartyName = isIncoming ? enq.senderName : enq.recipientName;
+                  return (
+                    <TouchableOpacity
+                      key={enq.id}
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        setAllEnquiriesModalVisible(false);
+                        handleOpenThreadModal(enq);
+                      }}
+                      style={[
+                        styles.enquiryCard,
+                        {
+                          width: '100%',
+                          padding: scaleSize(12),
+                          borderRadius: BorderRadius.md,
+                          marginBottom: scaleSize(8),
+                          ...Shadows.soft,
+                        },
+                      ]}
+                    >
+                      <View style={styles.enqTopRow}>
+                        <Ionicons name="person-circle" size={scaleSize(26)} color={Palette.primary} />
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                          <Text style={[styles.enqSender, { fontSize: scaleFont(13) }]}>
+                            {otherPartyName} ({enq.senderRole === 'farmer' ? 'Farmer' : 'Buyer'})
+                          </Text>
+                          <Text style={[styles.enqCropTag, { fontSize: scaleFont(11) }]}>
+                            Produce: {enq.cropName || 'Crop Harvest'}
+                          </Text>
+                        </View>
+                        {!enq.isRead && isIncoming && <View style={styles.unreadDot} />}
+                      </View>
+
+                      <Text style={[styles.enqSnippet, { fontSize: scaleFont(12), marginVertical: 4 }]}>
+                        &ldquo;{enq.message}&rdquo;
+                      </Text>
+
+                      <View style={styles.enqBottomRow}>
+                        <Text style={styles.enqTime}>
+                          {new Date(enq.createdAt).toLocaleDateString('en-GB', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                        <Text style={styles.enqReplyLink}>Open Thread & Reply ➔</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>

@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -7,17 +8,20 @@ import 'react-native-reanimated';
 
 import { ThemeProvider, useTheme } from '@/src/contexts/ThemeContext';
 import { AuthProvider } from '@/src/contexts/AuthContext';
+import { LocalizationProvider } from '@/src/contexts/LocalizationContext';
 
 export {
   ErrorBoundary,
 } from 'expo-router';
 
 export const unstable_settings = {
-  anchor: '(farmer)',
+  initialRouteName: 'index',
 };
 
-// Prevent splash screen from auto-hiding before asset loading is complete
-SplashScreen.preventAutoHideAsync();
+// Prevent splash screen from auto-hiding on native platforms before asset loading is complete
+if (Platform.OS !== 'web') {
+  SplashScreen.preventAutoHideAsync().catch(() => {});
+}
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -25,24 +29,29 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (error) throw error;
+    if (error) {
+      console.warn('Font load error:', error);
+    }
   }, [error]);
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (loaded && Platform.OS !== 'web') {
+      SplashScreen.hideAsync().catch(() => {});
     }
   }, [loaded]);
 
-  if (!loaded) {
+  // On web, render immediately even while fonts stream in to avoid blank screens
+  if (!loaded && Platform.OS !== 'web') {
     return null;
   }
 
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <RootLayoutNav />
-      </AuthProvider>
+      <LocalizationProvider>
+        <AuthProvider>
+          <RootLayoutNav />
+        </AuthProvider>
+      </LocalizationProvider>
     </ThemeProvider>
   );
 }

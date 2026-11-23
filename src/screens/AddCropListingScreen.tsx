@@ -8,7 +8,7 @@ import {
   Image,
   Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Palette, Spacing, BorderRadius, Shadows } from '../constants/theme';
 import { POPULAR_CROPS, SRI_LANKA_DISTRICTS, CROP_CATEGORIES } from '../constants/sriLanka';
@@ -42,16 +42,34 @@ const CROP_IMAGES: Record<string, string> = {
 export const AddCropListingScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
   const { user } = useAuth();
+  const searchParams = useLocalSearchParams<{
+    cropName?: string;
+    askingPrice?: string;
+    quantity?: string;
+    district?: string;
+  }>();
 
-  const [selectedCropInfo, setSelectedCropInfo] = useState(POPULAR_CROPS[1]); // Default Carrot
-  const [category, setCategory] = useState<CropCategory>('vegetables');
+  const initialCrop = searchParams.cropName
+    ? POPULAR_CROPS.find(
+        (c) =>
+          c.name.toLowerCase().includes(searchParams.cropName?.toLowerCase() || '') ||
+          (searchParams.cropName?.toLowerCase() || '').includes(c.name.toLowerCase())
+      ) || POPULAR_CROPS[1]
+    : POPULAR_CROPS[1];
+
+  const [selectedCropInfo, setSelectedCropInfo] = useState(initialCrop);
+  const [category, setCategory] = useState<CropCategory>(initialCrop.category);
   const [grade, setGrade] = useState<CropQualityGrade>('A');
-  const [quantity, setQuantity] = useState('1000');
+  const [quantity, setQuantity] = useState(searchParams.quantity || '1000');
   const [minOrder, setMinOrder] = useState('100');
-  const [askingPrice, setAskingPrice] = useState('280');
+  const [askingPrice, setAskingPrice] = useState(
+    searchParams.askingPrice || (initialCrop.benchmarkPriceLkrPerKg || 280).toString()
+  );
   const [harvestDateOption, setHarvestDateOption] = useState<'today' | 'yesterday' | 'custom'>('today');
   const [customHarvestDate, setCustomHarvestDate] = useState(new Date().toISOString().split('T')[0]);
-  const [district, setDistrict] = useState(user?.location?.district || 'Nuwara Eliya');
+  const [district, setDistrict] = useState(
+    searchParams.district || user?.location?.district || 'Nuwara Eliya'
+  );
   const [farmAddress, setFarmAddress] = useState(
     user?.location?.address || `${user?.location?.district || 'Nuwara Eliya'} Agrarian Division`
   );
@@ -416,6 +434,23 @@ export const AddCropListingScreen: React.FC = () => {
               <Text style={[styles.aiWidgetNote, { fontSize: scaleFont(11) }]}>
                 Based on Dambulla Economic Centre baseline: Rs. {benchmarkPrice}/kg
               </Text>
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: '/price-prediction',
+                    params: {
+                      cropName: selectedCropInfo.name,
+                      district,
+                      quantityKg: quantity,
+                    },
+                  })
+                }
+                style={{ marginTop: 6 }}
+              >
+                <Text style={{ fontSize: scaleFont(11), color: Palette.primary, fontWeight: '700' }}>
+                  Run Deep ML Price Prediction Model ➔
+                </Text>
+              </TouchableOpacity>
             </View>
             <TouchableOpacity onPress={handleApplyAIFairPrice} style={styles.applyBtn}>
               <Text style={styles.applyBtnText}>Apply Fair Price</Text>

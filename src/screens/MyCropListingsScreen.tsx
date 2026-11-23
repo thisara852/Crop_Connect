@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -620,9 +621,18 @@ export const MyCropListingsScreen: React.FC = () => {
                         <Text style={[styles.offerBuyerName, { fontSize: scaleFont(14) }]}>
                           {offer.buyerName} ({offer.buyerBusinessType})
                         </Text>
-                        <Text style={[styles.offerPhone, { fontSize: scaleFont(11) }]}>
-                          📞 {offer.buyerPhone} • Pickup: {offer.proposedPickupDate}
-                        </Text>
+                        <TouchableOpacity
+                          onPress={() => Linking.openURL(`tel:${offer.buyerPhone}`)}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}
+                        >
+                          <Ionicons name="call" size={12} color={Palette.primary} />
+                          <Text style={[styles.offerPhone, { fontSize: scaleFont(11), color: Palette.primary, fontWeight: '700' }]}>
+                            {offer.buyerPhone}
+                          </Text>
+                          <Text style={[styles.offerPhone, { fontSize: scaleFont(11) }]}>
+                            • Pickup: {offer.proposedPickupDate}
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                       <View style={[styles.statusBadge, { backgroundColor: Palette.primaryTint }]}>
                         <Text style={[styles.statusBadgeText, { fontSize: scaleFont(11) }]}>
@@ -670,6 +680,19 @@ export const MyCropListingsScreen: React.FC = () => {
                           variant="ghost"
                           onPress={() => handleOfferResponse(offer.id, 'rejected')}
                           style={{ flex: 1 }}
+                        />
+                      </View>
+                    )}
+
+                    {offer.status === 'accepted' && (
+                      <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: Palette.subtleBorder }}>
+                        <Button
+                          title={`Call Buyer for Dispatch (${offer.buyerPhone})`}
+                          size="sm"
+                          variant="primary"
+                          icon="call"
+                          fullWidth
+                          onPress={() => Linking.openURL(`tel:${offer.buyerPhone}`)}
                         />
                       </View>
                     )}

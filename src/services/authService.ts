@@ -178,6 +178,39 @@ export async function registerWithFirebase(data: RegisterData): Promise<UserProf
       updatedAt: serverTimestamp(),
     });
 
+    // 5. If buyer, also initialize `buyers/{uid}` document in Cloud Firestore
+    if (data.role === 'buyer') {
+      const buyerDoc = {
+        id: uid,
+        userId: uid,
+        businessName: data.farmOrBusinessName?.trim() || `${data.fullName.trim()} Wholesale Hub`,
+        businessType: data.buyerBusinessType || 'wholesaler',
+        contactPerson: data.fullName.trim(),
+        phone: data.phone.trim(),
+        email: cleanEmail,
+        district: data.district,
+        address: data.businessAddress?.trim() || `${data.district}, Sri Lanka`,
+        latitude: 6.9271,
+        longitude: 79.8612,
+        purchasingRequirements: {
+          preferredCrops: data.preferredCrops && data.preferredCrops.length > 0 ? data.preferredCrops : ['Carrot', 'Tomato', 'Beans'],
+          minOrderQuantityKg: data.minOrderKg || 100,
+          maxOrderQuantityKg: data.maxOrderKg || 2500,
+          paymentTerms: 'instant_bank_transfer',
+          preferredDeliveryMode: 'farmgate_pickup',
+          hasColdStorage: true,
+          weeklyTargetBudgetLkr: 500000,
+          preferredDistricts: data.preferredDistricts && data.preferredDistricts.length > 0 ? data.preferredDistricts : [data.district, 'Nuwara Eliya', 'Matale'],
+        },
+        isVerifiedBusiness: true,
+        rating: 5.0,
+        dealsCompleted: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(doc(db, 'buyers', uid), buyerDoc);
+    }
+
     return userProfile;
   } catch (error: any) {
     // Check if offline/demo fallback is needed for test environments

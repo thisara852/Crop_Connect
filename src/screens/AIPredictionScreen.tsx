@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Palette, Spacing, BorderRadius, Shadows } from '../constants/theme';
 import { POPULAR_CROPS, SRI_LANKA_DISTRICTS } from '../constants/sriLanka';
@@ -21,11 +21,20 @@ import { CropQualityGrade, AIPricePredictionResponse } from '../types/ai';
 
 export const AIPredictionScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
+  const searchParams = useLocalSearchParams<{
+    cropName?: string;
+    district?: string;
+    quantityKg?: string;
+  }>();
 
-  const [selectedCrop, setSelectedCrop] = useState(POPULAR_CROPS[0].name);
-  const [selectedDistrict, setSelectedDistrict] = useState(SRI_LANKA_DISTRICTS[0].name);
+  const [selectedCrop, setSelectedCrop] = useState(
+    searchParams.cropName || POPULAR_CROPS[0].name
+  );
+  const [selectedDistrict, setSelectedDistrict] = useState(
+    searchParams.district || SRI_LANKA_DISTRICTS[0].name
+  );
   const [selectedGrade, setSelectedGrade] = useState<CropQualityGrade>('A');
-  const [quantity, setQuantity] = useState('1000');
+  const [quantity, setQuantity] = useState(searchParams.quantityKg || '1000');
   const [isRescue, setIsRescue] = useState(false);
   const [loading, setLoading] = useState(false);
   const [prediction, setPrediction] = useState<AIPricePredictionResponse | null>(null);
@@ -351,15 +360,63 @@ export const AIPredictionScreen: React.FC = () => {
               </Text>
             </View>
 
-            <Button
-              title="Compare with Dambulla & Pettah"
-              variant="outline"
-              size="md"
-              icon="stats-chart-outline"
-              fullWidth
-              onPress={() => router.push('/price-comparison')}
-              style={{ marginTop: scaleSize(14) }}
-            />
+            <View style={{ gap: scaleSize(8), marginTop: scaleSize(14) }}>
+              <Button
+                title="Compare Buyer Offers with AI Rate"
+                variant="outline"
+                size="md"
+                icon="stats-chart-outline"
+                fullWidth
+                onPress={() =>
+                  router.push({
+                    pathname: '/price-comparison',
+                    params: {
+                      cropName: selectedCrop,
+                      quantityKg: quantity,
+                      aiReferencePrice: prediction.fairPricePerKg.toString(),
+                    },
+                  })
+                }
+              />
+
+              <View style={{ flexDirection: 'row', gap: scaleSize(8) }}>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Price History"
+                    variant="outline"
+                    size="sm"
+                    icon="time-outline"
+                    fullWidth
+                    onPress={() =>
+                      router.push({
+                        pathname: '/price-history',
+                        params: { cropName: selectedCrop },
+                      })
+                    }
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Publish at AI Price"
+                    variant="primary"
+                    size="sm"
+                    icon="add-circle-outline"
+                    fullWidth
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(farmer)/add-crop',
+                        params: {
+                          cropName: selectedCrop,
+                          askingPrice: prediction.fairPricePerKg.toString(),
+                          quantity,
+                          district: selectedDistrict,
+                        },
+                      })
+                    }
+                  />
+                </View>
+              </View>
+            </View>
           </View>
         ) : null}
       </ScrollView>

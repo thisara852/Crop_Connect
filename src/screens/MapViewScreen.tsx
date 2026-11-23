@@ -1,52 +1,389 @@
-import React, { useState } from 'react';
+/**
+ * MapViewScreen — Buyer Map View with Firestore-backed buyer markers
+ * Shows registered buyers on a Sri Lanka map using react-native-maps (native)
+ * or a visual canvas fallback for web.
+ *
+ * ESLint compliance notes:
+ * - Map modules resolved once at module level (outside component) to avoid
+ *   setState-in-effect and no-require-imports violations
+ * - useCallback deps use full `user` object to satisfy React Compiler
+ */
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Palette, Spacing, BorderRadius, Shadows } from '../constants/theme';
+import { Palette, BorderRadius, Shadows } from '../constants/theme';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { useResponsive } from '../hooks/useResponsive';
-import { ALL_MOCK_LISTINGS } from '../services/mockDataService';
+import { useAuth } from '../hooks/useAuth';
+import {
+  FarmerLocation,
+  formatDistance,
+  checkFarmerLocationPermission,
+  requestFarmerLocationPermission,
+  getFarmerCurrentLocation,
+  getFallbackFarmerLocation,
+} from '../services/locationService';
+import {
+  BuyerMatchResult,
+  matchBuyersForFarmer,
+  getBuyerCoordinates,
+} from '../services/buyerMatchingService';
 
-interface MapPinItem {
-  id: string;
-  name: string;
-  district: string;
-  crop: string;
-  pricePerKg: number;
-  isRescue: boolean;
-  distanceKm: number;
-  listingId: string;
-  xPct: number;
-  yPct: number;
-}
-
-const SRI_LANKA_MAP_PINS: MapPinItem[] = [
-  { id: 'pin_1', name: 'Sunil Bandara Farm', district: 'Nuwara Eliya', crop: 'Carrot', pricePerKg: 280, isRescue: false, distanceKm: 8.4, listingId: 'crop_001', xPct: 48, yPct: 58 },
-  { id: 'pin_2', name: 'Gunasekara Tomato Farm', district: 'Matale', crop: 'Field Tomatoes', pricePerKg: 175, isRescue: true, distanceKm: 14.2, listingId: 'crop_002', xPct: 47, yPct: 44 },
-  { id: 'pin_3', name: 'Murugan Red Onions', district: 'Jaffna', crop: 'Red Onion', pricePerKg: 380, isRescue: false, distanceKm: 42.5, listingId: 'crop_003', xPct: 44, yPct: 14 },
-  { id: 'pin_4', name: 'Ranjith Leeks Field', district: 'Badulla', crop: 'Welimada Leeks', pricePerKg: 155, isRescue: true, distanceKm: 26.8, listingId: 'crop_004', xPct: 56, yPct: 62 },
-  { id: 'pin_5', name: 'Nihal Paddy Store', district: 'Polonnaruwa', crop: 'Keeri Samba', pricePerKg: 142, isRescue: false, distanceKm: 68.0, listingId: 'crop_005', xPct: 55, yPct: 38 },
-];
+// Resolve react-native-maps once at module level to avoid setState-in-effect
+const nativeMaps: {
+  MapView: React.ComponentType<any> | null;
+  Marker: React.ComponentType<any> | null;
+  Callout: React.ComponentType<any> | null;
+} =
+  Platform.OS !== 'web'
+    ? (() => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const m = require('react-native-maps');
+          return { MapView: m.default ?? m.MapView, Marker: m.Marker, Callout: m.Callout };
+        } catch {
+          return { MapView: null, Marker: null, Callout: null };
+        }
+      })()
+    : { MapView: null, Marker: null, Callout: null };
 
 export const MapViewScreen: React.FC = () => {
   const { scaleSize, scaleFont, contentPadding } = useResponsive();
-  const [selectedRadius, setSelectedRadius] = useState('50 km');
-  const [selectedPin, setSelectedPin] = useState<MapPinItem>(SRI_LANKA_MAP_PINS[1]);
+  const { user } = useAuth();
 
-  const activeListing =
-    ALL_MOCK_LISTINGS.find((l) => l.id === selectedPin.listingId) ||
-    ALL_MOCK_LISTINGS[0];
+  const [farmerLocation, setFarmerLocation] = useState<FarmerLocation | null>(null);
+  const [matches, setMatches] = useState<BuyerMatchResult[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedMatch, setSelectedMatch] = useState<BuyerMatchResult | null>(null);
+  const [maxDistanceKm, setMaxDistanceKm] = useState<number>(0);
 
+  const { MapView, Marker, Callout } = nativeMaps;
+
+  // Inline async logic in useEffect to satisfy react-hooks/set-state-in-effect
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      const fallbackDistrict = user?.location?.district || 'Nuwara Eliya';
+      let loc: FarmerLocation;
+      try {
+        const hasPermission = await checkFarmerLocationPermission();
+        if (hasPermission) {
+          loc = await getFarmerCurrentLocation(fallbackDistrict);
+        } else {
+          const granted = await requestFarmerLocationPermission();
+          loc = granted
+            ? await getFarmerCurrentLocation(fallbackDistrict)
+            : getFallbackFarmerLocation(fallbackDistrict, false);
+        }
+      } catch {
+        loc = getFallbackFarmerLocation(fallbackDistrict, false);
+      }
+      if (!cancelled) setFarmerLocation(loc);
+
+      try {
+        const results = await matchBuyersForFarmer(loc, user?.id ?? undefined, {});
+        if (!cancelled) {
+          setMatches(results);
+          if (results.length > 0) setSelectedMatch(results[0]);
+        }
+      } catch (e) {
+        console.error('Map matching error:', e);
+      }
+
+      if (!cancelled) setLoading(false);
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const displayedMatches = useMemo(
+    () => (maxDistanceKm > 0 ? matches.filter((m) => m.distanceKm <= maxDistanceKm) : matches),
+    [matches, maxDistanceKm]
+  );
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return Palette.primary;
+    if (score >= 60) return Palette.secondary;
+    if (score >= 40) return Palette.warning;
+    return Palette.slateMedium;
+  };
+
+  const callBuyer = (phone: string) => {
+    Linking.openURL(`tel:${phone.replace(/\s/g, '')}`);
+  };
+
+  // ── Loading fallback ────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <View style={[styles.screen, styles.centeredState]}>
+        <ActivityIndicator size="large" color={Palette.primary} />
+        <Text style={{ color: Palette.slateMedium, marginTop: 10, fontSize: scaleFont(14) }}>
+          Loading buyer map...
+        </Text>
+      </View>
+    );
+  }
+
+  // ── Shared: radius chips ────────────────────────────────────────────────
+  const radiusChips = (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <View style={styles.radiusRow}>
+        {[0, 25, 50, 100, 200].map((km) => {
+          const active = maxDistanceKm === km;
+          const label = km === 0 ? 'All Island' : `< ${km} km`;
+          return (
+            <TouchableOpacity
+              key={km}
+              onPress={() => setMaxDistanceKm(km)}
+              style={[
+                styles.radiusChip,
+                active && styles.radiusChipActive,
+                { paddingHorizontal: scaleSize(10), paddingVertical: scaleSize(4) },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.radiusText,
+                  active && styles.radiusTextActive,
+                  { fontSize: scaleFont(11) },
+                ]}
+              >
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+
+  // ── Shared: bottom callout card ──────────────────────────────────────────
+  const bottomCard = selectedMatch ? (
+    <View
+      style={[
+        styles.bottomCard,
+        {
+          marginHorizontal: scaleSize(contentPadding),
+          padding: scaleSize(14),
+          borderRadius: BorderRadius.xl,
+          ...Shadows.elevated,
+        },
+      ]}
+    >
+      <View style={styles.bottomCardTop}>
+        <View
+          style={[
+            styles.bottomScoreBadge,
+            { backgroundColor: getScoreColor(selectedMatch.matchScore) },
+          ]}
+        >
+          <Text style={[styles.bottomScoreText, { fontSize: scaleFont(16) }]}>
+            {selectedMatch.matchScore}%
+          </Text>
+          <Text style={[styles.bottomScoreLabel, { fontSize: scaleFont(9) }]}>MATCH</Text>
+        </View>
+
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text
+              style={[styles.bottomBizName, { fontSize: scaleFont(15) }]}
+              numberOfLines={1}
+            >
+              {selectedMatch.buyer.businessName}
+            </Text>
+            {selectedMatch.buyer.isVerifiedBusiness && (
+              <Badge label="Verified" variant="verified" size="sm" />
+            )}
+          </View>
+          <Text style={[styles.bottomContact, { fontSize: scaleFont(12) }]}>
+            {selectedMatch.buyer.contactPerson}
+          </Text>
+          <Text style={[styles.bottomDist, { fontSize: scaleFont(11) }]}>
+            {selectedMatch.buyer.district} · {formatDistance(selectedMatch.distanceKm)}
+          </Text>
+          {selectedMatch.matchedCrops.length > 0 && (
+            <Text
+              style={[styles.bottomCrops, { fontSize: scaleFont(11) }]}
+              numberOfLines={1}
+            >
+              Purchasing:{' '}
+              {selectedMatch.matchedCrops
+                .slice(0, 2)
+                .map((c) => c.cropName)
+                .join(', ')}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.bottomActions}>
+        <Button
+          title="View Details"
+          size="sm"
+          variant="outline"
+          icon="arrow-forward"
+          iconPosition="right"
+          onPress={() =>
+            router.push({ pathname: '/buyer/[id]', params: { id: selectedMatch.buyer.id } })
+          }
+        />
+        <Button
+          title="Call Buyer"
+          size="sm"
+          variant="primary"
+          icon="call-outline"
+          onPress={() => callBuyer(selectedMatch.buyer.phone)}
+        />
+      </View>
+    </View>
+  ) : null;
+
+  // ── Native map render ───────────────────────────────────────────────────
+  if (Platform.OS !== 'web' && MapView && Marker && Callout) {
+    const farmerLat = farmerLocation?.latitude ?? 7.2906;
+    const farmerLon = farmerLocation?.longitude ?? 80.6337;
+
+    return (
+      <View style={styles.screen}>
+        {/* Top Control Bar */}
+        <View
+          style={[
+            styles.topControlCard,
+            {
+              marginHorizontal: scaleSize(contentPadding),
+              padding: scaleSize(10),
+              borderRadius: BorderRadius.lg,
+              ...Shadows.medium,
+            },
+          ]}
+        >
+          <View style={styles.searchRow}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+              <Ionicons name="arrow-back" size={scaleSize(20)} color={Palette.charcoal} />
+            </TouchableOpacity>
+            <View style={{ flex: 1, marginHorizontal: 8 }}>
+              <Text style={[styles.mapHeaderTitle, { fontSize: scaleFont(14) }]}>
+                Buyer Map — Sri Lanka
+              </Text>
+              <Text style={[styles.mapHeaderSub, { fontSize: scaleFont(11) }]}>
+                {displayedMatches.length} Registered Buyers · {farmerLocation?.district}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push('/nearby-buyers')}
+              style={styles.iconBtn}
+            >
+              <Ionicons name="list" size={scaleSize(20)} color={Palette.primary} />
+            </TouchableOpacity>
+          </View>
+          {radiusChips}
+        </View>
+
+        <MapView
+          style={StyleSheet.absoluteFill}
+          initialRegion={{
+            latitude: farmerLat,
+            longitude: farmerLon,
+            latitudeDelta: 2.0,
+            longitudeDelta: 2.0,
+          }}
+          showsUserLocation={farmerLocation?.permissionGranted ?? false}
+          showsMyLocationButton={farmerLocation?.permissionGranted ?? false}
+        >
+          {farmerLocation && (
+            <Marker
+              coordinate={{ latitude: farmerLat, longitude: farmerLon }}
+              title="Your Farm Location"
+              description={farmerLocation.district}
+            >
+              <View style={styles.farmerPinOuter}>
+                <View style={styles.farmerPinInner}>
+                  <Ionicons name="person" size={scaleSize(14)} color="#fff" />
+                </View>
+              </View>
+            </Marker>
+          )}
+
+          {displayedMatches.map((item) => {
+            const coords = getBuyerCoordinates(item.buyer);
+            const scoreColor = getScoreColor(item.matchScore);
+            const isSelected = selectedMatch?.buyer.id === item.buyer.id;
+
+            return (
+              <Marker
+                key={item.buyer.id}
+                coordinate={coords}
+                onPress={() => setSelectedMatch(item)}
+                zIndex={isSelected ? 10 : 1}
+              >
+                <View
+                  style={[
+                    styles.buyerPin,
+                    {
+                      backgroundColor: scoreColor,
+                      transform: [{ scale: isSelected ? 1.2 : 1 }],
+                    },
+                  ]}
+                >
+                  <Ionicons name="business" size={scaleSize(11)} color="#fff" />
+                  <Text style={[styles.buyerPinScore, { fontSize: scaleFont(8) }]}>
+                    {item.matchScore}%
+                  </Text>
+                </View>
+                <View style={[styles.pinArrow, { borderTopColor: scoreColor }]} />
+
+                <Callout
+                  onPress={() =>
+                    router.push({ pathname: '/buyer/[id]', params: { id: item.buyer.id } })
+                  }
+                >
+                  <View style={styles.calloutBox}>
+                    <Text style={styles.calloutTitle} numberOfLines={1}>
+                      {item.buyer.businessName}
+                    </Text>
+                    <Text style={styles.calloutSub}>
+                      {item.buyer.district} · {formatDistance(item.distanceKm)}
+                    </Text>
+                    {item.matchedCrops.length > 0 && (
+                      <Text style={styles.calloutCrops} numberOfLines={1}>
+                        Buys:{' '}
+                        {item.matchedCrops
+                          .slice(0, 2)
+                          .map((c) => c.cropName)
+                          .join(', ')}
+                      </Text>
+                    )}
+                    <Text style={[styles.calloutAction, { color: Palette.primary }]}>
+                      Tap to view details →
+                    </Text>
+                  </View>
+                </Callout>
+              </Marker>
+            );
+          })}
+        </MapView>
+
+        {bottomCard}
+      </View>
+    );
+  }
+
+  // ── Web / fallback canvas ──────────────────────────────────────────────
   return (
     <View style={styles.screen}>
-      {/* Top Floating Controls */}
+      {/* Top Control Bar */}
       <View
         style={[
           styles.topControlCard,
@@ -64,181 +401,117 @@ export const MapViewScreen: React.FC = () => {
           </TouchableOpacity>
           <View style={{ flex: 1, marginHorizontal: 8 }}>
             <Text style={[styles.mapHeaderTitle, { fontSize: scaleFont(14) }]}>
-              Sri Lanka Agricultural Map
+              Sri Lanka Agricultural Buyer Map
             </Text>
             <Text style={[styles.mapHeaderSub, { fontSize: scaleFont(11) }]}>
-              {SRI_LANKA_MAP_PINS.length} Verified Farms in Radius
+              {displayedMatches.length} Registered Buyers · Web View
             </Text>
           </View>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Ionicons name="locate" size={scaleSize(20)} color={Palette.primary} />
+          <TouchableOpacity
+            onPress={() => router.push('/nearby-buyers')}
+            style={styles.iconBtn}
+          >
+            <Ionicons name="list" size={scaleSize(20)} color={Palette.primary} />
           </TouchableOpacity>
         </View>
-
-        {/* Radius Chips */}
-        <View style={styles.radiusRow}>
-          {['15 km', '35 km', '50 km', '100 km', 'All Island'].map((r) => {
-            const active = selectedRadius === r;
-            return (
-              <TouchableOpacity
-                key={r}
-                onPress={() => setSelectedRadius(r)}
-                style={[
-                  styles.radiusChip,
-                  active && styles.radiusChipActive,
-                  { paddingHorizontal: scaleSize(10), paddingVertical: scaleSize(4) },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.radiusText,
-                    active && styles.radiusTextActive,
-                    { fontSize: scaleFont(11) },
-                  ]}
-                >
-                  {r}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {radiusChips}
       </View>
 
-      {/* Visual Interactive Map Canvas */}
+      {/* Visual canvas */}
       <View style={styles.mapCanvas}>
-        {/* Map Background Grid Representation */}
-        <View style={styles.islandSilhoutte}>
-          <Text style={styles.islandWatermark}>SRI LANKA AGRARIAN RADAR</Text>
+        <View style={styles.islandSilhouette}>
+          <Text style={styles.islandWatermark}>SRI LANKA AGRARIAN BUYER MAP</Text>
           <View style={styles.watermarkCentroid}>
-            <Ionicons name="navigate-circle-outline" size={scaleSize(180)} color="rgba(36, 92, 70, 0.06)" />
+            <Ionicons
+              name="navigate-circle-outline"
+              size={scaleSize(180)}
+              color="rgba(36, 92, 70, 0.06)"
+            />
           </View>
         </View>
 
-        {/* Major Market Hub Labels */}
+        {/* Market Hub Labels */}
         <View style={[styles.hubTag, { top: '42%', left: '42%' }]}>
           <Ionicons name="storefront" size={scaleSize(12)} color={Palette.warning} />
           <Text style={styles.hubText}>Dambulla DEC</Text>
         </View>
-
         <View style={[styles.hubTag, { top: '65%', left: '26%' }]}>
           <Ionicons name="storefront" size={scaleSize(12)} color={Palette.primary} />
           <Text style={styles.hubText}>Pettah Manning</Text>
         </View>
-
         <View style={[styles.hubTag, { top: '56%', left: '55%' }]}>
           <Ionicons name="storefront" size={scaleSize(12)} color={Palette.secondaryDark} />
           <Text style={styles.hubText}>Keppetipola Hub</Text>
         </View>
 
-        {/* Pins */}
-        {SRI_LANKA_MAP_PINS.map((pin) => {
-          const isSelected = selectedPin.id === pin.id;
+        {/* Buyer pins */}
+        {displayedMatches.map((item, idx) => {
+          const coords = getBuyerCoordinates(item.buyer);
+          const xPct = ((coords.longitude - 79.6) / (81.9 - 79.6)) * 85 + 7;
+          const yPct = ((9.8 - coords.latitude) / (9.8 - 5.9)) * 85 + 7;
+          const scoreColor = getScoreColor(item.matchScore);
+          const isSelected = selectedMatch?.buyer.id === item.buyer.id;
+
           return (
             <TouchableOpacity
-              key={pin.id}
+              key={item.buyer.id}
               activeOpacity={0.88}
-              onPress={() => setSelectedPin(pin)}
+              onPress={() => setSelectedMatch(item)}
               style={[
                 styles.mapPin,
                 {
-                  top: `${pin.yPct}%`,
-                  left: `${pin.xPct}%`,
-                  transform: [{ scale: isSelected ? 1.25 : 1 }],
+                  top: `${yPct}%` as any,
+                  left: `${xPct}%` as any,
+                  transform: [{ scale: isSelected ? 1.3 : 1 }],
+                  zIndex: isSelected ? 10 : idx + 1,
                 },
               ]}
             >
               <View
                 style={[
                   styles.pinCallout,
-                  pin.isRescue && styles.pinCalloutRescue,
+                  { backgroundColor: scoreColor },
                   isSelected && styles.pinCalloutSelected,
                 ]}
               >
-                <Ionicons
-                  name={pin.isRescue ? 'flash' : 'leaf'}
-                  size={scaleSize(12)}
-                  color={pin.isRescue ? '#FFFFFF' : '#FFFFFF'}
-                />
-                <Text style={styles.pinCropText}>{pin.crop}</Text>
+                <Ionicons name="business" size={scaleSize(11)} color="#FFFFFF" />
+                <Text style={styles.pinCropText} numberOfLines={1}>
+                  {item.buyer.district}
+                </Text>
               </View>
-              <View
-                style={[
-                  styles.pinArrow,
-                  pin.isRescue && { borderTopColor: Palette.rescueRed },
-                  isSelected && { borderTopColor: Palette.primaryDark },
-                ]}
-              />
+              <View style={[styles.pinArrowCanvas, { borderTopColor: scoreColor }]} />
             </TouchableOpacity>
           );
         })}
-      </View>
 
-      {/* Selected Farm Callout Card */}
-      <View
-        style={[
-          styles.bottomCard,
-          {
-            marginHorizontal: scaleSize(contentPadding),
-            padding: scaleSize(Spacing.md),
-            borderRadius: BorderRadius.xl,
-            ...Shadows.elevated,
-          },
-        ]}
-      >
-        <View style={styles.bottomCardTop}>
-          <Image
-            source={{ uri: activeListing.images[0] || 'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?w=500&q=80' }}
-            style={[
-              styles.calloutImg,
-              {
-                width: scaleSize(68),
-                height: scaleSize(68),
-                borderRadius: BorderRadius.md,
-              },
-            ]}
-          />
-
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <View style={styles.badgeRow}>
-              {activeListing.isRescueCrop ? (
-                <Badge label="RESCUE DEAL" variant="rescue" size="sm" />
-              ) : (
-                <Badge label="AI FAIR PRICE" variant="aiFair" size="sm" />
-              )}
-              <Text style={styles.distanceTag}>{selectedPin.distanceKm} km away</Text>
+        {/* Farmer pin */}
+        {farmerLocation && (() => {
+          const lat = farmerLocation.latitude;
+          const lon = farmerLocation.longitude;
+          const xPct = ((lon - 79.6) / (81.9 - 79.6)) * 85 + 7;
+          const yPct = ((9.8 - lat) / (9.8 - 5.9)) * 85 + 7;
+          return (
+            <View
+              style={[
+                styles.mapPin,
+                {
+                  top: `${yPct}%` as any,
+                  left: `${xPct}%` as any,
+                  zIndex: 20,
+                },
+              ]}
+            >
+              <View style={styles.farmerPinOuter}>
+                <View style={styles.farmerPinInner}>
+                  <Ionicons name="person" size={scaleSize(12)} color="#fff" />
+                </View>
+              </View>
             </View>
-
-            <Text style={[styles.calloutTitle, { fontSize: scaleFont(15) }]}>
-              {activeListing.cropName}
-            </Text>
-            <Text style={[styles.calloutFarmer, { fontSize: scaleFont(12) }]}>
-              {activeListing.farmerName} • {activeListing.location.district}
-            </Text>
-
-            <Text style={[styles.calloutPrice, { fontSize: scaleFont(17) }]}>
-              Rs. {activeListing.askingPricePerKg}
-              <Text style={{ fontSize: scaleFont(11), color: Palette.slateMedium }}> / kg</Text>
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.calloutActions}>
-          <Button
-            title="View Details & Negotiate"
-            size="md"
-            variant={activeListing.isRescueCrop ? 'rescue' : 'primary'}
-            icon="arrow-forward"
-            iconPosition="right"
-            fullWidth
-            onPress={() =>
-              router.push({
-                pathname: '/crop/[id]',
-                params: { id: activeListing.id },
-              })
-            }
-          />
-        </View>
+          );
+        })()}
       </View>
+
+      {bottomCard}
     </View>
   );
 };
@@ -247,6 +520,10 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#EAE6DC',
+  },
+  centeredState: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   topControlCard: {
     position: 'absolute',
@@ -304,15 +581,15 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#F0ECE1',
   },
-  islandSilhoutte: {
+  islandSilhouette: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
   islandWatermark: {
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '900',
-    color: 'rgba(36, 92, 70, 0.12)',
+    color: 'rgba(36, 92, 70, 0.1)',
     letterSpacing: 2,
     position: 'absolute',
     top: 90,
@@ -347,22 +624,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Palette.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderRadius: BorderRadius.full,
-  },
-  pinCalloutRescue: {
-    backgroundColor: Palette.rescueRed,
+    maxWidth: 100,
   },
   pinCalloutSelected: {
-    backgroundColor: Palette.primaryDark,
     borderWidth: 2,
-    borderColor: Palette.accent,
+    borderColor: '#fff',
   },
   pinCropText: {
-    fontSize: 10,
+    fontSize: 9,
     color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  pinArrowCanvas: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderTopWidth: 6,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    alignSelf: 'center',
+  },
+  farmerPinOuter: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Palette.accentDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  farmerPinInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buyerPin: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 10,
+    gap: 2,
+    minWidth: 42,
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  buyerPinScore: {
+    color: '#fff',
     fontWeight: '800',
   },
   pinArrow: {
@@ -373,8 +685,33 @@ const styles = StyleSheet.create({
     borderTopWidth: 6,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderTopColor: Palette.primary,
     alignSelf: 'center',
+  },
+  calloutBox: {
+    padding: 10,
+    minWidth: 170,
+    maxWidth: 240,
+  },
+  calloutTitle: {
+    fontWeight: '800',
+    color: Palette.charcoal,
+    fontSize: 12,
+  },
+  calloutSub: {
+    color: Palette.slateMedium,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  calloutCrops: {
+    color: Palette.primaryDark,
+    fontWeight: '600',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  calloutAction: {
+    fontWeight: '700',
+    fontSize: 11,
+    marginTop: 6,
   },
   bottomCard: {
     position: 'absolute',
@@ -390,33 +727,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
-  calloutImg: {
-    backgroundColor: Palette.slateBorder,
-  },
-  badgeRow: {
-    flexDirection: 'row',
+  bottomScoreBadge: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 2,
+    justifyContent: 'center',
   },
-  distanceTag: {
-    fontSize: 11,
-    color: Palette.slateMedium,
-    fontWeight: '600',
+  bottomScoreText: {
+    color: '#fff',
+    fontWeight: '900',
   },
-  calloutTitle: {
+  bottomScoreLabel: {
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  bottomBizName: {
     fontWeight: '800',
     color: Palette.charcoal,
+    flexShrink: 1,
+    marginRight: 6,
   },
-  calloutFarmer: {
+  bottomContact: {
     color: Palette.slateMedium,
-    marginBottom: 2,
+    marginTop: 2,
   },
-  calloutPrice: {
-    fontWeight: '900',
-    color: Palette.primary,
+  bottomDist: {
+    color: Palette.slateMedium,
+    marginTop: 1,
+    fontWeight: '600',
   },
-  calloutActions: {
+  bottomCrops: {
+    color: Palette.primaryDark,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  bottomActions: {
+    flexDirection: 'row',
+    gap: 10,
     borderTopWidth: 1,
     borderTopColor: Palette.subtleBorder,
     paddingTop: 10,

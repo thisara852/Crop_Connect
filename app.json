@@ -33,6 +33,13 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CropConnect needs your location to find nearby agricultural buyers.",
+          "locationAlwaysAndWhenInUsePermission": "CropConnect needs your location to find nearby agricultural buyers."
+        }
       ]
     ],
     "experiments": {
